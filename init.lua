@@ -85,6 +85,15 @@ local function distinctScreens(wins)   -- 窗口分布在几块屏上
     return n
 end
 
+local function frontmostByDisplay()    -- displayId -> 该屏最靠前窗口的 id（跨所有 App）
+    local map = {}
+    for _, w in ipairs(hs.window.orderedWindows()) do   -- 前→后顺序，首个命中即该屏最前
+        local sid = w:screen() and w:screen():id() or 0
+        if map[sid] == nil then map[sid] = w:id() end
+    end
+    return map
+end
+
 local function cycleApp(bundle, state)
     local app, wins = appWindows(bundle)
     if not app or #wins == 0 then
@@ -102,17 +111,41 @@ local function cycleApp(bundle, state)
         target = app:focusedWindow() or app:mainWindow() or wins[1]
     else
         -- 同屏有多个窗口会遮挡 → 连按逐个轮换（不移动窗口位置）
+        -- 跳过"已经在各自屏最前"的窗口：切它无可见变化，会让人以为按键没生效
+        local n = #wins
+        local front = frontmostByDisplay()
+        local function isTop(w)
+            local sid = w:screen() and w:screen():id() or 0
+            return front[sid] == w:id()
+        end
+
         local now = hs.timer.secondsSinceEpoch()
+        local startAfter                       -- 从 (startAfter+1) 开始向后扫
         if now - state.last < CYCLE_BURST and state.idx >= 1 then
-            state.idx = (state.idx % #wins) + 1    -- 连按：下一个（循环）
+            startAfter = state.idx             -- 连按：从当前之后
         else
-            local mru = app:focusedWindow() or app:mainWindow() or wins[1]  -- 首次：从最近使用的开始
-            state.idx = 1
-            for k, w in ipairs(wins) do if w == mru then state.idx = k; break end end
+            local mru = app:focusedWindow() or app:mainWindow() or wins[1]
+            startAfter = 0                     -- 首次：从 MRU 起（含自身）
+            for k, w in ipairs(wins) do if w == mru then startAfter = k - 1; break end end
         end
         state.last = now
-        target = wins[state.idx]
-        if target then target:unminimize(); target:focus() end
+
+        local chosen                           -- 下一个"未在最前"的窗口
+        for step = 1, n do
+            local idx = ((startAfter + step - 1) % n) + 1
+            if not isTop(wins[idx]) then chosen = idx; break end
+        end
+
+        if chosen then
+            state.idx = chosen
+            target = wins[chosen]
+            target:unminimize(); target:focus()
+        else
+            -- 所有窗口都已在各自屏最前（全可见）→ 没有被遮挡的可切，退化为全部前置
+            app:activate(true)
+            state.idx = 0
+            target = app:focusedWindow() or app:mainWindow() or wins[1]
+        end
     end
 
     if single and target then centerMouseOn(target) end
