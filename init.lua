@@ -72,6 +72,14 @@ hs.hotkey.bind({"cmd", "ctrl"}, "B", function()
 
     local sf      = hs.screen.mainScreen():frame()
     local n       = #wins
+
+    -- 给每个显示器一个短标签：D1=按 allScreens 顺序，主屏加 *
+    local screenLabel, primary = {}, hs.screen.primaryScreen()
+    for si, s in ipairs(hs.screen.allScreens()) do
+        screenLabel[s:id()] = "D" .. si .. (s == primary and "*" or "")
+    end
+    local multiDisplay = #hs.screen.allScreens() > 1
+
     local cols    = math.ceil(math.sqrt(n))
     local rows    = math.ceil(n / cols)
     local margin  = 60
@@ -102,9 +110,13 @@ hs.hotkey.bind({"cmd", "ctrl"}, "B", function()
                 trackMouseDown = true, id = "win" .. i,
             }
         end
-        c[#c + 1] = {  -- 序号 + 标题
+        local title = w:title() ~= "" and w:title() or "(无标题)"
+        local sc = w:screen()
+        local dlab = sc and screenLabel[sc:id()] or "?"
+        c[#c + 1] = {  -- 序号 +（多屏时）显示器标记 + 标题
             type = "text",
-            text = string.format("%d.  %s", i, w:title() ~= "" and w:title() or "(无标题)"),
+            text = multiDisplay and string.format("%d.  [%s] %s", i, dlab, title)
+                                 or string.format("%d.  %s", i, title),
             frame = { x = x, y = y + thumbH + 2, w = cellW, h = titleH },
             textSize = 15, textColor = { white = 1 }, textAlignment = "center",
         }
