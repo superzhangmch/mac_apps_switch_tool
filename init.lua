@@ -9,8 +9,8 @@ local MODS = {"cmd", "ctrl"}
 
 local APPS = {
     { key = "T", bundle = "com.microsoft.teams2",   maximize = false },  -- Teams（不最大化）
-    { key = "I", bundle = "com.googlecode.iterm2",  maximize = true },  -- iTerm
     { key = "C", bundle = "com.google.Chrome",      maximize = true },  -- Chrome（激活最近用的窗口）
+    -- iTerm(⌘⌃I) 单独处理（移到当前活跃屏 + 连按轮换窗口），见下方
 }
 
 local function focusApp(bundle, maximize)
@@ -45,6 +45,57 @@ for _, a in ipairs(APPS) do
         end
     end)
 end
+
+-- ===== iTerm (⌘⌃I)：移到"当前活跃屏"并最大化；短时间内连按 → 逐个轮换 iTerm 窗口 =====
+local ITERM_BUNDLE = "com.googlecode.iterm2"
+local ITERM_BURST  = 1.2               -- 秒：此间隔内再次按视为"连按轮换"
+local iterm = { idx = 0, last = 0 }
+
+local function itermWindows()          -- iTerm 的标准窗口，按 id 稳定排序
+    local app = hs.application.get(ITERM_BUNDLE)
+    if not app then return nil, {} end
+    local wins = {}
+    for _, w in ipairs(app:allWindows()) do
+        if w:isStandard() then wins[#wins + 1] = w end
+    end
+    table.sort(wins, function(a, b) return a:id() < b:id() end)
+    return app, wins
+end
+
+local function showITerm()
+    local target = hs.screen.mainScreen()     -- 当前活跃屏（聚焦窗口所在的屏）
+    local app, wins = itermWindows()
+    if not app or #wins == 0 then
+        hs.application.launchOrFocusByBundleID(ITERM_BUNDLE)   -- 没开就启动
+        return
+    end
+    local now = hs.timer.secondsSinceEpoch()
+    if now - iterm.last < ITERM_BURST and iterm.idx >= 1 then
+        iterm.idx = (iterm.idx % #wins) + 1    -- 连按：下一个（循环）
+    else
+        local mru = app:focusedWindow() or app:mainWindow() or wins[1]  -- 首次：从最近使用的开始
+        iterm.idx = 1
+        for k, w in ipairs(wins) do if w == mru then iterm.idx = k; break end end
+    end
+    iterm.last = now
+
+    local w = wins[iterm.idx]
+    if not w then return end
+    w:unminimize()
+    if not w:screen() or w:screen():id() ~= target:id() then w:moveToScreen(target) end
+    w:focus()
+    w:maximize()
+end
+
+hs.hotkey.bind(MODS, "I", function()
+    local cur = hs.window.focusedWindow()
+    if cur and cur:isFullScreen() then
+        cur:setFullScreen(false)
+        hs.timer.doAfter(0.8, showITerm)
+    else
+        showITerm()
+    end
+end)
 
 -- ===== 列出所有 Chrome 窗口（大缩略图网格，固定顺序）：⌘⌃B (b=browser) =====
 -- 按窗口 id 排序（创建时分配、终生不变）→ 每次顺序一致
