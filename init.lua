@@ -7,6 +7,10 @@ local MODS = {"cmd", "ctrl"}
 local ITERM_BUNDLE  = "com.googlecode.iterm2"
 local CHROME_BUNDLE = "com.google.Chrome"
 
+-- 选项：Chrome 逐屏轮换时，轮完该屏所有 Chrome 窗口后，再按一次把 Chrome 压下、
+-- 露出该屏原来的非浏览器窗口（形成环：C1→…→CN→其他窗口→C1）。设 false 则 CN 回到 C1。
+local REVEAL_OTHER_AFTER_CYCLE = true
+
 local function centerMouseOn(win)     -- 把鼠标移到窗口正中
     if not win then return end
     local f = win:frame()
@@ -134,6 +138,16 @@ local function sortedScreens()        -- 从左到右（同列再按上到下）
     return ss
 end
 
+local function topStdWinOnScreen(sid, excludeBundle)   -- 该屏最靠前的标准窗口（可排除某 App）
+    for _, w in ipairs(hs.window.orderedWindows()) do   -- 前→后
+        if w:isStandard() and w:screen() and w:screen():id() == sid then
+            local a = w:application()
+            if not excludeBundle or (a and a:bundleID() ~= excludeBundle) then return w end
+        end
+    end
+    return nil
+end
+
 local function cycleChromeOnScreen(screenPos)
     local app, wins = appWindows(CHROME_BUNDLE)
     if not app or #wins == 0 then
@@ -151,19 +165,32 @@ local function cycleChromeOnScreen(screenPos)
     end
     if #list == 0 then hs.alert.show("这块屏上没有 Chrome 窗口"); return end
 
-    local fm = appFrontByDisplay(CHROME_BUNDLE)
-    local cur, curIdx = fm[sid], 0
-    for k, w in ipairs(list) do if cur and w:id() == cur:id() then curIdx = k; break end end
-
-    local frontApp = hs.application.frontmostApplication()
-    local already  = frontApp and frontApp:bundleID() == CHROME_BUNDLE
+    -- 该屏当前最靠前的标准窗口（任何 App），据此决定下一步
+    local frontWin = topStdWinOnScreen(sid)
+    local frontApp = frontWin and frontWin:application()
+    local curIdx = 0                  -- frontWin 在该屏 Chrome 列表中的位置（不是则 0）
+    if frontApp and frontApp:bundleID() == CHROME_BUNDLE then
+        for k, w in ipairs(list) do if w:id() == frontWin:id() then curIdx = k; break end end
+    end
 
     local target
-    if already and curIdx >= 1 then
-        target = list[(curIdx % #list) + 1]        -- 已在 Chrome → 下一个（循环）
+    if curIdx == 0 then
+        target = list[1]                       -- 该屏最前不是 Chrome → 从第一个 Chrome 开始
+    elseif curIdx < #list then
+        target = list[curIdx + 1]              -- 还没轮完 → 下一个 Chrome
     else
-        target = list[curIdx >= 1 and curIdx or 1] -- 未在 Chrome → 显示该屏当前（或第一个）
+        -- 已是该屏最后一个 Chrome 窗口
+        if REVEAL_OTHER_AFTER_CYCLE then
+            local other = topStdWinOnScreen(sid, CHROME_BUNDLE)   -- 露出该屏最上层的非 Chrome 窗口
+            if other then
+                other:unminimize(); other:raise(); other:focus()
+                centerMouseOn(other)
+                return
+            end
+        end
+        target = list[1]                       -- 无其他窗口 或 未开选项 → 回到第一个
     end
+
     target:unminimize(); target:raise(); target:focus()
     centerMouseOn(target)
 end
