@@ -219,4 +219,26 @@ end
 hs.hotkey.bind(MODS, "C", wrapFullscreen(function() cycleChromeOnScreen(1) end))  -- 左屏
 hs.hotkey.bind(MODS, "B", wrapFullscreen(function() cycleChromeOnScreen(2) end))  -- 右屏
 
-hs.alert.show("Hammerspoon ✅  ⌘⌃T=Teams ⌘⌃I=iTerm  ⌘⌃C/B=Chrome 左屏/右屏")
+-- ===== ⌘⌃0：合并多余桌面（把散落在其他桌面的窗口收回来）=====
+-- 背景：macOS 的 AX 接口拿不到"隐藏桌面(Space)"上的窗口，无法直接召唤它们。
+-- 可靠做法是删掉多余的用户桌面 —— macOS 会把其上的窗口自动挪到保留的桌面（不关窗口，不丢数据）。
+local function collapseDesktops()
+    local all = hs.spaces.allSpaces() or {}
+    local removed = 0
+    for _, scr in ipairs(hs.screen.allScreens()) do
+        local list   = all[scr:getUUID()]
+        local active = hs.spaces.activeSpaceOnScreen(scr)
+        if list then
+            for _, sp in ipairs(list) do
+                if sp ~= active and hs.spaces.spaceType(sp) == "user" then
+                    if pcall(hs.spaces.removeSpace, sp) then removed = removed + 1 end
+                end
+            end
+        end
+    end
+    hs.alert.show(removed > 0 and ("已合并多余桌面：删除 " .. removed .. " 个，窗口已挪回")
+                              or "没有多余的用户桌面")
+end
+hs.hotkey.bind(MODS, "0", collapseDesktops)
+
+hs.alert.show("Hammerspoon ✅  ⌘⌃T=Teams ⌘⌃I=iTerm  ⌘⌃C/B=Chrome 左/右屏  ⌘⌃0=合并桌面")
