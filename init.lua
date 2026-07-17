@@ -17,6 +17,28 @@ local function centerMouseOn(win)     -- 把鼠标移到窗口正中
     hs.mouse.absolutePosition({ x = f.x + f.w / 2, y = f.y + f.h / 2 })
 end
 
+-- 若窗口在别的桌面(Space)，把它"拽"到它那块屏当前可见的桌面（这样召唤时你不用跳桌面）
+local function pullToSpace(win)
+    if not win or not hs.spaces then return end
+    local scr = win:screen()
+    if not scr then return end
+    local ok, target = pcall(hs.spaces.activeSpaceOnScreen, scr)   -- 该屏当前可见的桌面
+    local cur = select(2, pcall(hs.spaces.windowSpaces, win))      -- 窗口所在的桌面
+    if ok and target and cur and not hs.fnutils.contains(cur, target) then
+        pcall(hs.spaces.moveWindowToSpace, win, target)
+    end
+end
+
+local function raiseWin(win)          -- 恢复最小化 + 拽到当前桌面 + 抬到前台（不抢键盘焦点）
+    if not win then return end
+    win:unminimize(); pullToSpace(win); win:raise()
+end
+
+local function summonWin(win)         -- raiseWin + 拿键盘焦点（真正"召唤到面前"）
+    if not win then return end
+    raiseWin(win); win:focus()
+end
+
 local function wrapFullscreen(fn)     -- 当前最前窗口若为原生全屏，先退出再执行 fn
     return function()
         local cur = hs.window.focusedWindow()
@@ -61,8 +83,7 @@ local function focusApp(bundle, maximize, moveMouse)
         local app = hs.application.get(bundle)
         local win = app and (app:focusedWindow() or app:mainWindow() or app:allWindows()[1])
         if win then
-            win:unminimize()
-            win:focus()
+            summonWin(win)
             if maximize then win:maximize() end
             if moveMouse then hs.timer.doAfter(maximize and 0.2 or 0, function() centerMouseOn(win) end) end
         elseif tries < 20 then        -- 冷启动可能要等，最多重试 ~3s
@@ -111,13 +132,13 @@ local function cycleApp(bundle)
                 if cur and w:id() == cur:id() then curIdx = k; break end
             end
             local nextW = list[(curIdx % #list) + 1]
-            nextW:unminimize(); nextW:raise()
+            raiseWin(nextW)
             if sid == activeSid then focusTarget = nextW end
         end
         focusTarget = focusTarget or byDisplay[order[1]][1]
     end
 
-    if focusTarget then focusTarget:focus() end
+    if focusTarget then summonWin(focusTarget) end
     if #order == 1 and focusTarget then centerMouseOn(focusTarget) end
 end
 
@@ -183,7 +204,7 @@ local function cycleChromeOnScreen(screenPos)
         if REVEAL_OTHER_AFTER_CYCLE then
             local other = topStdWinOnScreen(sid, CHROME_BUNDLE)   -- 露出该屏最上层的非 Chrome 窗口
             if other then
-                other:unminimize(); other:raise(); other:focus()
+                summonWin(other)
                 centerMouseOn(other)
                 return
             end
@@ -191,7 +212,7 @@ local function cycleChromeOnScreen(screenPos)
         target = list[1]                       -- 无其他窗口 或 未开选项 → 回到第一个
     end
 
-    target:unminimize(); target:raise(); target:focus()
+    summonWin(target)
     centerMouseOn(target)
 end
 
