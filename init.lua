@@ -224,20 +224,38 @@ hs.hotkey.bind(MODS, "B", wrapFullscreen(function() cycleChromeOnScreen(2) end))
 -- 可靠做法是删掉多余的用户桌面 —— macOS 会把其上的窗口自动挪到保留的桌面（不关窗口，不丢数据）。
 local function collapseDesktops()
     local all = hs.spaces.allSpaces() or {}
-    local removed = 0
+    local removedUser, fsSpaces = 0, {}
     for _, scr in ipairs(hs.screen.allScreens()) do
         local list   = all[scr:getUUID()]
         local active = hs.spaces.activeSpaceOnScreen(scr)
         if list then
             for _, sp in ipairs(list) do
-                if sp ~= active and hs.spaces.spaceType(sp) == "user" then
-                    if pcall(hs.spaces.removeSpace, sp) then removed = removed + 1 end
+                local t = hs.spaces.spaceType(sp)
+                if t == "user" and sp ~= active then
+                    if pcall(hs.spaces.removeSpace, sp) then removedUser = removedUser + 1 end
+                elseif t == "fullscreen" then
+                    fsSpaces[#fsSpaces + 1] = sp   -- 全屏 Space：稍后逐个去退出全屏
                 end
             end
         end
     end
-    hs.alert.show(removed > 0 and ("已合并多余桌面：删除 " .. removed .. " 个，窗口已挪回")
-                              or "没有多余的用户桌面")
+
+    -- 逐个处理全屏 Space：切过去 → 退出全屏（窗口落回普通桌面、该 Space 消失）→ 下一个
+    local i = 0
+    local function nextFs()
+        i = i + 1
+        if i > #fsSpaces then
+            hs.alert.show("已合并：删多余桌面 " .. removedUser .. " 个，退出全屏 " .. #fsSpaces .. " 个")
+            return
+        end
+        pcall(hs.spaces.gotoSpace, fsSpaces[i])
+        hs.timer.doAfter(0.9, function()
+            local w = hs.window.focusedWindow()
+            if w and w:isFullScreen() then w:setFullScreen(false) end
+            hs.timer.doAfter(0.9, nextFs)
+        end)
+    end
+    nextFs()
 end
 hs.hotkey.bind(MODS, "0", collapseDesktops)
 
